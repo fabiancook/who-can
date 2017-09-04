@@ -22,10 +22,6 @@
  SOFTWARE.
  */
 
-/**
- * @param {string|number|Array<string|number>|Promise|Function<string|number|Array<string|number>>} resolver
- * @returns {string|number|Array<string|number>}
- */
 async function resolveValueOrReturn(resolver) {
   if (resolver instanceof Function) {
     return resolver();
@@ -37,22 +33,12 @@ async function resolveValueOrReturn(resolver) {
 }
 
 /**
- * Returns actions as an array of string|numbers
- * @param {string|number|Array<string|number>|Function<string|number|Array<string|number>>} value
- * @param {WhoCanOptions} options
- * @returns {Array<string|number>}
+ * Returns actions as an array
  */
 async function getActions(value, options) {
   const resolved = await (options.resolveValueOrReturn || resolveValueOrReturn)(value);
-  if (typeof resolved === 'string' || typeof resolved === 'number') {
-    return [ resolved ];
-  }
   if (!Array.isArray(resolved)) {
-    throw new Error('Expected action to be an array or a string|number');
-  }
-  const allValid = resolved.every((item) => typeof item === 'string' || typeof item === 'number');
-  if (!allValid) {
-    throw new Error('Expected action to be an array or a string|number');
+    return [ resolved ];
   }
   return resolved;
 }
@@ -60,53 +46,72 @@ async function getActions(value, options) {
 class WhoCanSingle {
 
   constructor() {
-    this.map = {};
+    this.map = new Map();
   }
 
   /**
-   *
-   * @param {string|number} identifier
-   * @param {string|number} action
-   * @param {string|number} target
+   * @param identifier
+   * @param action
+   * @param target
    */
   allow(identifier, action, target) {
-    this.map[identifier] = this.map[identifier] || {};
-    this.map[identifier][target] = this.map[identifier][target] || [];
-    if (this.map[identifier][target].includes(action)) {
+    let identifierMap;
+    if (this.map.has(identifier)) {
+      identifierMap = this.map.get(identifier);
+    } else {
+      identifierMap = new Map();
+      this.map.set(identifier, identifierMap);
+    }
+    let targetArray;
+    if (identifierMap.has(target)) {
+      targetArray = identifierMap.get(target);
+    } else {
+      targetArray = [];
+      identifierMap.set(target, targetArray);
+    }
+    if (targetArray.includes(action)) {
       return;
     }
-    this.map[identifier][target].push(action);
+    targetArray.push(action);
   }
 
   /**
-   *
-   * @param {string|number} identifier
-   * @param {string|number} action
-   * @param {string|number} target
+   * @param identifier
+   * @param action
+   * @param target
    */
   disallow(identifier, action, target) {
-    this.map[identifier] = this.map[identifier] || {};
-    this.map[identifier][target] = this.map[identifier][target] || [];
-    const index = this.map[identifier][target].indexOf(action)
+    if (!this.map.has(identifier)) {
+      return;
+    }
+    const identifierMap = this.map.get(identifier);
+    if (!identifierMap.has(target)) {
+      return;
+    }
+    const targetArray = identifierMap.get(target);
+    const index = targetArray.indexOf(action);
     if (index === -1) {
       return;
     }
-    this.map[identifier][target].splice(index, 1);
+    targetArray.splice(index, 1);
   }
 
   /**
-   *
-   * @param {string|number} identifier
-   * @param {string|number} action
-   * @param {string|number} target
+   * @param identifier
+   * @param action
+   * @param target
    * @returns {boolean}
    */
   can(identifier, action, target) {
-    return (
-      this.map[identifier] &&
-      this.map[identifier][target] &&
-      this.map[identifier][target].includes(action)
-    ) || false
+    if (!this.map.has(identifier)) {
+      return false;
+    }
+    const identifierMap = this.map.get(identifier);
+    if (!identifierMap.has(target)) {
+      return false;
+    }
+    const targetArray = identifierMap.get(target);
+    return targetArray.includes(action);
   }
 
 }
@@ -129,30 +134,23 @@ class WhoCan {
   }
 
   /**
-   * @param {string|number|Promise|Function<string|number>} identifier
-   * @param {string|number|Array<string|number>|Promise|Function<string|number|Array<string|number>|*>} actions
-   * @param {string|number|Promise|Function<string|number>} target
-   * @returns {WhoCanActionOptions}
+   * @param {*|Promise|Function<*>} identifier
+   * @param {*|[]|Promise|Function<*|[]>} actions
+   * @param {*} target
+   * @param {*} rest
    */
-  async getOptions(identifier, actions, target) {
-    const options = {
-      identifier: await (this.options.resolveValueOrReturn || resolveValueOrReturn)(identifier),
-      actions: await (this.options.getActions || getActions)(actions, this.options),
-      target: await (this.options.resolveValueOrReturn || resolveValueOrReturn)(target)
+  async getOptions(identifier, actions, target, ...rest) {
+    return {
+      identifier: await (this.options.resolveValueOrReturn || resolveValueOrReturn)(identifier, this.options, ...rest),
+      actions: await (this.options.getActions || getActions)(actions, this.options, ...rest),
+      target: await (this.options.resolveValueOrReturn || resolveValueOrReturn)(target, this.options, ...rest)
     };
-    if (typeof options.identifier !== 'string' && typeof options.identifier !== 'number') {
-      throw new Error('Expected identifier to be a string or number');
-    }
-    if (typeof options.target !== 'string' && typeof options.identifier !== 'number') {
-      throw new Error('Expected target to be a string or number');
-    }
-    return options;
   }
 
   /**
-   * @param {string|number|Promise|Function<string|number>} identifier
-   * @param {string|number|Array<string|number>|Promise|Function<string|number|Array<string|number>>} actions
-   * @param {string|number|Promise|Function<string|number>} target
+   * @param {*|Promise|Function<*>} identifier
+   * @param {*|[]|Promise|Function<*|[]>} actions
+   * @param {*} target
    * @param {*} rest
    */
   async allow(identifier, actions, target, ...rest) {
@@ -163,9 +161,9 @@ class WhoCan {
   }
 
   /**
-   * @param {string|number|Promise|Function<string|number>} identifier
-   * @param {string|number|Array<string|number>|*|Promise|Function<string|number|Array<string|number>>} actions
-   * @param {string|number|Promise|Function<string|number>} target
+   * @param {*|Promise|Function<*>} identifier
+   * @param {*|[]|Promise|Function<*|[]>} actions
+   * @param {*} target
    * @param {*} rest
    */
   async disallow(identifier, actions, target, ...rest) {
@@ -176,9 +174,9 @@ class WhoCan {
   }
 
   /**
-   * @param {string|number|Promise|Function<string|number>} identifier
-   * @param {string|number|Array<string|number>|Promise|Function<string|number|Array<string|number>>} actions
-   * @param {string|number|Promise|Function<string|number>} target
+   * @param {*|Promise|Function<*>} identifier
+   * @param {*|[]|Promise|Function<*|[]>} actions
+   * @param {*} target
    * @param {*} rest
    * @returns {boolean}
    */
@@ -200,9 +198,9 @@ if (typeof module !== 'undefined') {
 
 /**
  * @typedef {object} WhoCanActionOptions
- * @property {string|number} identifier
- * @property {Array<string|number>} actions
- * @property {string|number} target
+ * @property {*} identifier
+ * @property {Array<*>} actions
+ * @property {*} target
  */
 
 /**
